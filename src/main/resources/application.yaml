@@ -7,53 +7,46 @@ spring:
 
   cloud:
     gateway:
-      default-filters:
-        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials
-
+      # =========================
+      # GLOBAL CORS CONFIG
+      # =========================
       globalcors:
+        add-to-simple-url-handler-mapping: true
         corsConfigurations:
           '[/**]':
-            allowedOrigins: "*"
-            allowedMethods: "*"
-            allowedHeaders: "*"
+            allowedOrigins:
+              - http://localhost:5173
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - Authorization
+              - Content-Type
+              - RequestVerify
+            allowCredentials: true
 
+      # =========================
+      # ROUTES
+      # =========================
       routes:
 
-        # ==========================================================
-        # API SERVICE ROUTE (backend runs on 8062)
-        # ==========================================================
+        # -------------------------
+        # API SERVICE (8062)
+        # -------------------------
         - id: api-service
           uri: http://localhost:8062
           predicates:
-            - Path=/api/**
+            - Path=/apiService/**
           filters:
-            - CircuitBreaker=name=apiCircuitBreaker,fallbackUri=forward:/fallback/api
+            - StripPrefix=1
+            #- CircuitBreaker=name=apiCircuitBreaker,fallbackUri=forward:/fallback/apiServiceFallback
 
-
-        # ==========================================================
-        # SWAGGER UI + API DOCS ROUTING (NO PREFIX)
-        # ==========================================================
-
-        # Swagger UI HTML + JS/CSS files
-        - id: swagger-ui
-          uri: http://localhost:8062
-          predicates:
-            - Path=/swagger-ui/**, /swagger-ui.html
-          filters:
-            - RewritePath=/(?<segment>.*), /${segment}
-
-        # OpenAPI JSON + swagger-config
-        - id: swagger-docs
-          uri: http://localhost:8062
-          predicates:
-            - Path=/v3/api-docs/**, /swagger-resources/**, /webjars/**
-          filters:
-            - RewritePath=/(?<segment>.*), /${segment}
-
-
-        # ==========================================================
-        # AUTH SERVICE ROUTE (backend runs on 8061)
-        # ==========================================================
+        # -------------------------
+        # AUTH SERVICE (8061)
+        # -------------------------
         - id: oauth2-service
           uri: http://localhost:8061
           predicates:
@@ -61,34 +54,29 @@ spring:
           filters:
             - StripPrefix=1
 
-
-    # Enable load-balancer for future microservices
     loadbalancer:
       enabled: true
 
-
-  # ==================================================
-  # JWT VALIDATION SETTINGS
-  # ==================================================
+  # =========================
+  # SECURITY (JWT VALIDATION)
+  # =========================
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8061/realms/skch
+          issuer-uri: http://localhost:8061
 
-
-  # ==================================================
-  # REDIS CONFIG (optional for rate-limiting)
-  # ==================================================
+  # =========================
+  # REDIS (OPTIONAL)
+  # =========================
   data:
     redis:
       host: localhost
       port: 6379
 
-
-# ==================================================
-# LOGGING SETTINGS
-# ==================================================
+# =========================
+# LOGGING
+# =========================
 logging:
   level:
     root: INFO
