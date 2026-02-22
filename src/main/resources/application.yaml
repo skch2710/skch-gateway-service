@@ -92,7 +92,7 @@ spring:
 # =========================
 # LOGGING
 # =========================
-logging:
-  level:
-    root: INFO
-    org.springframework.cloud.gateway: DEBUG
+#logging:
+#  level:
+#    root: INFO
+#    org.springframework.cloud.gateway: DEBUG
