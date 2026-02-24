@@ -89,6 +89,12 @@ spring:
       password: Redis@123
       timeout: 2000
 
+springdoc:
+  swagger-ui:
+    urls:
+      - name: API SERVICE
+        url: /apiService/v3/api-docs
+
 # =========================
 # LOGGING
 # =========================
