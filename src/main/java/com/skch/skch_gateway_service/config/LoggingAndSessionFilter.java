@@ -2,6 +2,7 @@ package com.skch.skch_gateway_service.config;
 
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.context.annotation.Bean;
@@ -30,17 +31,22 @@ import reactor.core.publisher.Mono;
 public class LoggingAndSessionFilter {
 
     private static final String REDIS_KEY_PREFIX = "USER_SESSION:";
-    private static final String FILTER_EXECUTED = "logging.session.filter.executed";
+    private static final String FILTER_MARKER_HEADER = "X-Gateway-Filter-Marker";
     private static final String START_TIME_ATTR = "start.time";
+    private static final String LOG_ENABLED_ATTR = "log.enabled";
 
-    // ✅ List of public path prefixes – adjust to match your actual endpoints
+    // Public paths – both unprefixed (as seen by the gateway) and prefixed
     private static final List<String> PUBLIC_PATHS = List.of(
+        "/authenticate/login",
+        "/authenticate/logout",
+        "/test",
+        "/swagger-ui/",
+        "/v3/api-docs/",
+        "/webjars/",
         "/apiService/authenticate/login",
+        "/apiService/authenticate/logout",
         "/apiService/test",
-        "/swagger-ui/**",
-        "/v3/api-docs/**",
-        "/webjars/**",
-        "/apiService/v3/api-docs/**"
+        "/apiService/v3/api-docs/"
     );
 
     private final ReactiveStringRedisTemplate redisTemplate;
@@ -50,63 +56,83 @@ public class LoggingAndSessionFilter {
     @Order(-1)
     public GlobalFilter combinedFilter() {
         return (exchange, chain) -> {
-            // 🛡️ Guard against double execution (critical fix)
-            if (exchange.getAttribute(FILTER_EXECUTED) != null) {
-                return chain.filter(exchange);
-            }
-            exchange.getAttributes().put(FILTER_EXECUTED, true);
+            // Determine if this is the first execution using a marker header
+            String headerMarker = exchange.getRequest().getHeaders().getFirst(FILTER_MARKER_HEADER);
+            boolean isFirstExecution = (headerMarker == null);
 
-            // Store start time for response logging
+            // Build the exchange to use (add marker on first execution)
+            final ServerWebExchange finalExchange;
+            if (isFirstExecution) {
+                String newMarker = UUID.randomUUID().toString();
+                ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                        .header(FILTER_MARKER_HEADER, newMarker)
+                        .build();
+                finalExchange = exchange.mutate().request(mutatedRequest).build();
+                finalExchange.getAttributes().put(FILTER_MARKER_HEADER, newMarker);
+            } else {
+                finalExchange = exchange;
+            }
+
+            // Store start time
             long startTime = System.currentTimeMillis();
-            exchange.getAttributes().put(START_TIME_ATTR, startTime);
+            finalExchange.getAttributes().put(START_TIME_ATTR, startTime);
 
             // Extract request details
-            ServerHttpRequest request = exchange.getRequest();
+            ServerHttpRequest request = finalExchange.getRequest();
             String path = request.getURI().getPath();
             String method = request.getMethod() != null ? request.getMethod().name() : "UNKNOWN";
             String clientIp = getClientIp(request);
             String userAgent = request.getHeaders().getFirst("User-Agent");
 
-            // ✅ If the path is public, skip all authentication/validation logic
+            // ----- Public path handling -----
             if (isPublicPath(path)) {
-                log.info("REQUEST : | {} {} | user=ANONYMOUS | ip={} | ua={}", method, path, clientIp, userAgent);
-                return chain.filter(exchange)
-                        .doFinally(signalType -> {
-                            long duration = System.currentTimeMillis() - startTime;
-                            log.info("RESPONSE : | {} {} | status={} | time={}ms",
-                                    method, path, exchange.getResponse().getStatusCode(), duration);
-                        });
+                // Only log request on first execution
+                if (isFirstExecution) {
+                    log.info("REQUEST : | {} {} | user=ANONYMOUS | ip={} | ua={}", method, path, clientIp, userAgent);
+                    finalExchange.getAttributes().put(LOG_ENABLED_ATTR, true);
+                }
+                return chain.filter(finalExchange)
+                        .doFinally(signalType -> logResponseIfEnabled(finalExchange, method, path));
             }
 
-            // For protected paths, continue with authentication‑based handling
+            // ----- Protected path handling -----
             return ReactiveSecurityContextHolder.getContext()
                     .map(ctx -> ctx.getAuthentication())
                     .flatMap(auth -> {
                         String userName = extractUserName(auth);
-                        log.info("REQUEST : | {} {} | user={} | ip={} | ua={}", method, path, userName, clientIp, userAgent);
-
-                        if (auth instanceof JwtAuthenticationToken jwtAuth) {
-                            return validateSession(jwtAuth, exchange, chain);
+                        // Only log request if we have a user (i.e., authenticated) – this prevents the second "ANONYMOUS" log
+                        if (!"ANONYMOUS".equals(userName)) {
+                            log.info("REQUEST : | {} {} | user={} | ip={} | ua={}", method, path, userName, clientIp, userAgent);
+                            finalExchange.getAttributes().put(LOG_ENABLED_ATTR, true);
                         }
-                        return chain.filter(exchange);
+                        // Proceed with session validation if needed
+                        if (auth instanceof JwtAuthenticationToken jwtAuth) {
+                            return validateSession(jwtAuth, finalExchange, chain);
+                        }
+                        return chain.filter(finalExchange);
                     })
                     .switchIfEmpty(Mono.defer(() -> {
-                        // No security context – should not happen for protected paths, but handle gracefully
-                        log.info("REQUEST : | {} {} | user=ANONYMOUS | ip={} | ua={}", method, path, clientIp, userAgent);
-                        return chain.filter(exchange);
+                        // No security context – do not log request (avoids duplicate anonymous logs)
+                        // But still need to continue the chain
+                        return chain.filter(finalExchange);
                     }))
-                    .doFinally(signalType -> {
-                        Long start = exchange.getAttribute(START_TIME_ATTR);
-                        if (start != null) {
-                            long duration = System.currentTimeMillis() - start;
-                            log.info("RESPONSE : | {} {} | status={} | time={}ms",
-                                    method, path, exchange.getResponse().getStatusCode(), duration);
-                        }
-                    });
+                    .doFinally(signalType -> logResponseIfEnabled(finalExchange, method, path));
         };
     }
 
-    /** Check if the request path matches any public prefix */
+    /** Log response only if this execution logged the request */
+    private void logResponseIfEnabled(ServerWebExchange exchange, String method, String path) {
+        Boolean logEnabled = exchange.getAttribute(LOG_ENABLED_ATTR);
+        if (logEnabled != null && logEnabled) {
+            Long start = exchange.getAttribute(START_TIME_ATTR);
+            if (start != null) {
+                long duration = System.currentTimeMillis() - start;
+                log.info("RESPONSE : | {} {} | status={} | time={}ms",
+                        method, path, exchange.getResponse().getStatusCode(), duration);
+            }
+        }
+    }
+
     private boolean isPublicPath(String path) {
         return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
     }
