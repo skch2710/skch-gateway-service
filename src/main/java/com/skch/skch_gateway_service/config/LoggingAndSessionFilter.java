@@ -4,6 +4,7 @@ import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,12 +40,14 @@ public class LoggingAndSessionFilter {
     private static final List<String> PUBLIC_PATHS = List.of(
         "/authenticate/login",
         "/authenticate/logout",
+        "/authenticate/refresh",
         "/test",
         "/swagger-ui/",
         "/v3/api-docs/",
         "/webjars/",
         "/apiService/authenticate/login",
         "/apiService/authenticate/logout",
+        "/apiService/authenticate/refresh",
         "/apiService/test",
         "/apiService/v3/api-docs/"
     );
@@ -156,7 +159,7 @@ public class LoggingAndSessionFilter {
 
     private Mono<Void> validateSession(JwtAuthenticationToken jwtAuth,
                                         ServerWebExchange exchange,
-                                        org.springframework.cloud.gateway.filter.GatewayFilterChain chain) {
+                                        GatewayFilterChain chain) {
         String userId = jwtAuth.getToken().getSubject();
         String jwtSid = jwtAuth.getToken().getClaimAsString("sid");
 
