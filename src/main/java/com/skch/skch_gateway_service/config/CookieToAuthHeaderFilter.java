@@ -20,12 +20,20 @@ public class CookieToAuthHeaderFilter implements WebFilter {
 		var cookies = exchange.getRequest().getCookies();
 		var cookie = cookies.getFirst("ACCESS_TOKEN");
 		
+		String path = exchange.getRequest().getURI().getPath();
+		
+		if(path.contains("/login")) {
+			return chain.filter(exchange);
+		}
+		
 		if (cookie != null && cookie.getValue() != null && !cookie.getValue().isBlank()) {
 			ServerWebExchange mutated = exchange.mutate()
 					.request(r -> r.header(HttpHeaders.AUTHORIZATION, "Bearer " + cookie.getValue()))
 					.build();
 			return chain.filter(mutated);
 		}
+		
+		
 		return chain.filter(exchange);
 	}
 }
