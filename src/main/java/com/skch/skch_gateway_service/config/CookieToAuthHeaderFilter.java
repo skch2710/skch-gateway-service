@@ -8,8 +8,10 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+@Slf4j
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class CookieToAuthHeaderFilter implements WebFilter {
@@ -22,11 +24,12 @@ public class CookieToAuthHeaderFilter implements WebFilter {
 		
 		String path = exchange.getRequest().getURI().getPath();
 		
-		if(path.contains("/login")) {
+		if(path.contains("/login") || path.contains("/refresh") || path.contains("/logout")) {
 			return chain.filter(exchange);
 		}
 		
 		if (cookie != null && cookie.getValue() != null && !cookie.getValue().isBlank()) {
+			log.info("Found ACCESS_TOKEN cookie, adding Authorization header for path: {}", path);
 			ServerWebExchange mutated = exchange.mutate()
 					.request(r -> r.header(HttpHeaders.AUTHORIZATION, "Bearer " + cookie.getValue()))
 					.build();

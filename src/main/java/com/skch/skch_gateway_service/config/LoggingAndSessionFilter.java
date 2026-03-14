@@ -35,8 +35,8 @@ public class LoggingAndSessionFilter {
 
 	// Public paths – both unprefixed (as seen by the gateway) and prefixed
 	private static final List<String> PUBLIC_PATHS = List.of("/authenticate/login", "/authenticate/logout", "/test",
-			"/swagger-ui/", "/v3/api-docs/", "/webjars/", "/apiService/authenticate/login",
-			"/apiService/authenticate/logout", "/apiService/test", "/apiService/v3/api-docs/");
+			"/swagger-ui/", "/v3/api-docs", "/webjars/", "/apiService/authenticate/login",
+			"/apiService/authenticate/logout", "/apiService/test", "/apiService/v3/api-docs");
 
 	private final ReactiveStringRedisTemplate redisTemplate;
 	private final ObjectMapper objectMapper = new ObjectMapper();
@@ -55,10 +55,6 @@ public class LoggingAndSessionFilter {
 			String clientIp = getClientIp(request);
 			String userAgent = request.getHeaders().getFirst("User-Agent");
 
-			MultiValueMap<String, HttpCookie> cookies = exchange.getRequest().getCookies();
-			HttpCookie cookie = cookies.getFirst("ACCESS_TOKEN");
-			String tokenValue = cookie != null ? cookie.getValue() : "NO_COOKIE";
-
 			// ----- Public path handling -----
 			if (isPublicPath(path)) {
 				log.info("REQUEST : | {} {} | user=ANONYMOUS | ip={} | ua={}", method, path, clientIp, userAgent);
@@ -68,6 +64,10 @@ public class LoggingAndSessionFilter {
 							exchange.getResponse().getStatusCode(), duration);
 				});
 			}
+			
+			MultiValueMap<String, HttpCookie> cookies = exchange.getRequest().getCookies();
+			HttpCookie cookie = cookies.getFirst("ACCESS_TOKEN");
+			String tokenValue = cookie != null ? cookie.getValue() : "NO_COOKIE";
 
 			// ----- Protected path handling -----
 			return validateSession(exchange, tokenValue, chain, startTime, method, path);
@@ -124,17 +124,27 @@ public class LoggingAndSessionFilter {
 	}
 
 	private Mono<Void> unauthorized(ServerWebExchange exchange, String message) {
-		exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-		exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-		try {
-			ErrorResponse error = new ErrorResponse(HttpStatus.UNAUTHORIZED.value(), "Unauthorized", message);
-			byte[] bytes = objectMapper.writeValueAsBytes(error);
-			DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(bytes);
-			return exchange.getResponse().writeWith(Mono.just(buffer));
-		} catch (JsonProcessingException e) {
-			log.error("Error creating error response", e);
-			return exchange.getResponse().setComplete();
-		}
+	    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+//	    exchange.getResponse().getHeaders()
+//	            .add("Access-Control-Allow-Origin", "http://localhost:5173");
+//	    exchange.getResponse().getHeaders()
+//	            .add("Access-Control-Allow-Credentials", "true");
+//	    exchange.getResponse().getHeaders()
+//	            .setContentType(MediaType.APPLICATION_JSON);
+	    try {
+	        ErrorResponse error = new ErrorResponse(
+	                HttpStatus.UNAUTHORIZED.value(),
+	                "Unauthorized",
+	                message
+	        );
+	        byte[] bytes = objectMapper.writeValueAsBytes(error);
+	        DataBuffer buffer = exchange.getResponse()
+	                .bufferFactory()
+	                .wrap(bytes);
+	        return exchange.getResponse().writeWith(Mono.just(buffer));
+	    } catch (JsonProcessingException e) {
+	        return exchange.getResponse().setComplete();
+	    }
 	}
 
 	private record ErrorResponse(int status, String error, String message) {

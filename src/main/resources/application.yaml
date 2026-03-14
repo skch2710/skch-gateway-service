@@ -16,27 +16,6 @@ spring:
         webflux:
 
           # =========================
-          # GLOBAL CORS CONFIGURATION
-          # =========================
-          globalcors:
-            add-to-simple-url-handler-mapping: true
-            cors-configurations:
-              '[/**]':
-                allowed-origins:
-                  - http://localhost:5173
-                allowed-methods:
-                  - GET
-                  - POST
-                  - PUT
-                  - DELETE
-                  - OPTIONS
-                allowed-headers:
-                  - Authorization
-                  - Content-Type
-                  - RequestVerify
-                allow-credentials: true
-
-          # =========================
           # GLOBAL RATE LIMITING
           # =========================
           default-filters:
